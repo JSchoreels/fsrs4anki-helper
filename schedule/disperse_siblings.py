@@ -16,8 +16,7 @@ def get_siblings(did=None, filter_flag=False, filtered_nid_string=""):
     if filter_flag:
         nid_query = f"AND nid IN {filtered_nid_string}"
 
-    siblings = mw.col.db.all(
-        f"""
+    siblings = mw.col.db.all(f"""
     SELECT 
         id,
         nid,
@@ -44,30 +43,35 @@ def get_siblings(did=None, filter_flag=False, filtered_nid_string=""):
     AND type = 2
     AND queue != -1
     {did_query if did is not None else ""}
-    """
-    )
+    """)
     nid_siblings_dict = {}
+    deck_config_cache = {}
     for cid, nid, did, stability, due in siblings:
         if nid not in nid_siblings_dict:
             nid_siblings_dict[nid] = []
-        dr = get_dr(mw.col.decks, did)
-        max_ivl = mw.col.decks.config_dict_for_deck_id(did)["rev"]["maxIvl"]
+
+        if did not in deck_config_cache:
+            deck_config_cache[did] = {
+                "dr": get_dr(mw.col.decks, did),
+                "max_ivl": mw.col.decks.config_dict_for_deck_id(did)["rev"]["maxIvl"],
+            }
+
+        config = deck_config_cache[did]
         nid_siblings_dict[nid].append(
             (
                 cid,
                 did,
                 stability,
                 due,
-                dr,
-                max_ivl,
+                config["dr"],
+                config["max_ivl"],
             )
         )
     return nid_siblings_dict
 
 
 def get_siblings_when_review(card: Card):
-    siblings = mw.col.db.all(
-        f"""
+    siblings = mw.col.db.all(f"""
     SELECT 
         id,
         CASE WHEN odid==0
@@ -82,14 +86,15 @@ def get_siblings_when_review(card: Card):
     AND json_extract(data, '$.s') IS NOT NULL
     AND type = 2
     AND queue != -1
-    """
-    )
+    """)
     siblings = map(
-        lambda x: x
-        + [
-            get_dr(mw.col.decks, x[1]),
-            mw.col.decks.config_dict_for_deck_id(x[1])["rev"]["maxIvl"],
-        ],
+        lambda x: (
+            x
+            + [
+                get_dr(mw.col.decks, x[1]),
+                mw.col.decks.config_dict_for_deck_id(x[1])["rev"]["maxIvl"],
+            ]
+        ),
         siblings,
     )
     return list(siblings)
@@ -104,13 +109,24 @@ def get_due_range(cid, stability, due, desired_retention, maximum_interval):
         return (due, due), last_review
 
     min_ivl, max_ivl = get_fuzz_range(new_ivl, last_interval, maximum_interval)
+
+    # If the card is currently scheduled outside the fuzz range, don't reschedule the card to bring it within the fuzz range.
+    # Rather, create a new fuzz range around the original due date. Users can use `reschedule` to bring the card in range.
     if (
         due > last_review + max_ivl + 2
     ):  # +2 is just a safeguard to exclude cards that go beyond the fuzz range due to rounding
-        # don't reschedule the card to bring it within the fuzz range. Rather, create another fuzz range around the original due date.
         current_ivl = due - last_review
         # set maximum_interval = current_ivl to prevent a further increase in ivl
         min_ivl, max_ivl = get_fuzz_range(current_ivl, last_interval, current_ivl)
+
+    if (
+        due < last_review + min_ivl - 2
+    ):  # +2 is just a safeguard to exclude cards that go beyond the fuzz range due to rounding
+        current_ivl = due - last_review
+        min_ivl, max_ivl = get_fuzz_range(current_ivl, last_interval, maximum_interval)
+        # Prevent a further decrease in ivl because it is already lower than the optimal range
+        min_ivl = max(current_ivl, min_ivl)
+
     if due >= mw.col.sched.today:
         due_range = (
             max(last_review + min_ivl, mw.col.sched.today),
@@ -164,7 +180,7 @@ def disperse_siblings(
         mw.reset()
 
     fut = mw.taskman.run_in_background(
-        lambda: disperse_siblings_backgroud(
+        lambda: disperse_siblings_background(
             did, filter_flag, filtered_nid_string, text_from_reschedule
         ),
         on_done,
@@ -173,7 +189,7 @@ def disperse_siblings(
     return fut
 
 
-def disperse_siblings_backgroud(
+def disperse_siblings_background(
     did, filter_flag=False, filtered_nid_string="", text_from_reschedule=""
 ):
     nid_siblings = get_siblings(did, filter_flag, filtered_nid_string)
@@ -241,7 +257,6 @@ def disperse_siblings_when_review(reviewer, card: Card, ease):
     best_due_dates, due_ranges, min_gap = disperse(siblings)
 
     for cid, due in best_due_dates.items():
-        due = max(due, mw.col.sched.today + 1)
         card = mw.col.get_card(cid)
         old_due = card.odue if card.odid else card.due
         last_review, _ = get_last_review_date_and_interval(card)

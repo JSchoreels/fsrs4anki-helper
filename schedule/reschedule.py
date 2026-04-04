@@ -4,7 +4,7 @@ from aqt import QAction, browser
 from .disperse_siblings import disperse_siblings
 from anki.cards import Card, FSRSMemoryState
 from anki.decks import DeckManager
-from anki.utils import ids2str
+from anki.utils import ids2str, point_version
 from anki.stats import (
     CARD_TYPE_REV,
     QUEUE_TYPE_SUSPENDED,
@@ -71,18 +71,24 @@ class FSRS:
         self.DM = DeckManager(mw.col)
         self.load_balancer_enabled = mw.col._get_load_balancer_enabled()
 
-    def set_load_balance(self, did_query=None):
+        # Version-specific load balancer check
+        anki_version = point_version()
+        if anki_version >= 250500:  # 25.05+
+            self.load_balancer_enabled = mw.col._get_load_balancer_enabled()
+        elif anki_version >= 241100:  # 24.11+
+            self.load_balancer_enabled = mw.col._get_enable_load_balancer()
+        else:  # Older versions
+            self.load_balancer_enabled = False
+
+    def set_load_balance(self):
         true_due = "CASE WHEN odid==0 THEN due ELSE odue END"
         original_did = "CASE WHEN odid==0 THEN did ELSE odid END"
 
-        deck_stats = mw.col.db.all(
-            f"""SELECT {original_did}, {true_due}, count() 
+        deck_stats = mw.col.db.all(f"""SELECT {original_did}, {true_due}, count() 
                 FROM cards 
                 WHERE type = 2  
                 AND queue != -1
-                {did_query if did_query is not None else ""}
-                GROUP BY {original_did}, {true_due}"""
-        )
+                GROUP BY {original_did}, {true_due}""")
 
         self.due_cnt_per_day_per_preset = defaultdict(lambda: defaultdict(int))
         self.did_to_preset_id = {}
@@ -93,7 +99,7 @@ class FSRS:
             self.due_cnt_per_day_per_preset[preset_id][due_date] += count
             self.did_to_preset_id[did] = preset_id
             self.preset_id_to_easy_days_percentages[preset_id] = (
-                self.DM.config_dict_for_deck_id(did)["easyDaysPercentages"]
+                self.DM.config_dict_for_deck_id(did).get("easyDaysPercentages", [])
             )
 
         self.due_today_per_preset = defaultdict(
@@ -193,6 +199,10 @@ class FSRS:
     def apply_fuzz(self, ivl):
         if ivl < 2.5:
             return ivl
+
+        if not self.load_balancer_enabled and not self.easy_specific_due_dates:
+            return ivl + mw.col.fuzz_delta(self.card.id, ivl)
+
         last_review, last_interval = get_last_review_date_and_interval(self.card)
         min_ivl, max_ivl = get_fuzz_range(ivl, last_interval, self.maximum_interval)
 
@@ -307,15 +317,16 @@ def reschedule_background(
         did_list = ids2str(fsrs.DM.deck_and_child_ids(did))
         did_query = f"AND did IN {did_list}"
 
-    fsrs.set_load_balance(did_query=did_query)
-    fsrs.easy_specific_due_dates = easy_specific_due_dates
     fsrs.apply_easy_days = apply_easy_days
+    if fsrs.load_balancer_enabled or easy_specific_due_dates:
+        fsrs.set_load_balance()
+        fsrs.easy_specific_due_dates = list(easy_specific_due_dates)
 
-    for easy_date_str in config.easy_dates:
-        easy_date = datetime.strptime(easy_date_str, "%Y-%m-%d").date()
-        specific_due = fsrs.today + (easy_date - fsrs.current_date).days
-        if specific_due not in fsrs.easy_specific_due_dates:
-            fsrs.easy_specific_due_dates.append(specific_due)
+        for easy_date_str in config.easy_dates:
+            easy_date = datetime.strptime(easy_date_str, "%Y-%m-%d").date()
+            specific_due = fsrs.today + (easy_date - fsrs.current_date).days
+            if specific_due not in fsrs.easy_specific_due_dates:
+                fsrs.easy_specific_due_dates.append(specific_due)
 
     if recent:
         today_cutoff = mw.col.sched.day_cutoff
@@ -346,8 +357,7 @@ def reschedule_background(
         else ""
     )
 
-    cid_did_nid = mw.col.db.all(
-        f"""
+    cid_did_nid = mw.col.db.all(f"""
         SELECT 
             id,
             CASE WHEN odid==0
@@ -362,8 +372,7 @@ def reschedule_background(
         {filter_query if filter_flag else ""}
         {skip_query}
         ORDER BY ivl
-    """
-    )
+    """)
     total_cnt = len(cid_did_nid)
     mw.taskman.run_on_main(
         lambda: mw.progress.start(
@@ -481,7 +490,8 @@ def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
         card = update_card_due_ivl(card, new_ivl)
         write_custom_data(card, "v", "reschedule")
         due_after = card.odue if card.odid else card.due
-        fsrs.update_due_cnt_per_day(due_before, due_after)
+        if fsrs.load_balancer_enabled or fsrs.easy_specific_due_dates:
+            fsrs.update_due_cnt_per_day(due_before, due_after)
 
     return card, True
 
