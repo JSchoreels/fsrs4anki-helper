@@ -103,7 +103,7 @@ def get_siblings_when_review(card: Card):
 def get_due_range(cid, stability, due, desired_retention, maximum_interval):
     card = mw.col.get_card(cid)
     last_review, last_interval = get_last_review_date_and_interval(card)
-    new_ivl = next_interval(stability, desired_retention, -get_decay(card))
+    new_ivl = fsrs_next_interval(cid, stability, desired_retention)
 
     if new_ivl <= 2.5:
         return (due, due), last_review

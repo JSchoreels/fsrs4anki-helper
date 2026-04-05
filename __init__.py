@@ -215,7 +215,7 @@ def visualize_schedule(did=None):
     if "conf" in deck:
         config = mw.col.decks.get_config(deck["conf"])
         retention = get_dr(mw.col.decks, deck["id"])
-        param_options = ["fsrsParams6", "fsrsParams5", "fsrsWeights"]
+        param_options = ["fsrsParams7", "fsrsParams6", "fsrsParams5", "fsrsWeights"]
         fsrs_params = next(
             (
                 config[param]

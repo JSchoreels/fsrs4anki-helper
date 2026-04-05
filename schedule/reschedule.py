@@ -237,8 +237,8 @@ class FSRS:
         )
         return best_ivl
 
-    def next_interval(self, stability, decay):
-        new_interval = next_interval(stability, self.desired_retention, decay)
+    def next_interval(self, stability):
+        new_interval = fsrs_next_interval(self.card.id, stability, self.desired_retention)
         if self.load_balancer_enabled:
             return self.apply_fuzz(new_interval)
         return new_interval
@@ -463,8 +463,6 @@ def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
     if card.type == CARD_TYPE_REV:
         fsrs.set_card(card)
         fsrs.set_fuzz_factor(cid, card.reps)
-        decay = get_decay(card)
-
         if fsrs.reschedule_threshold > 0 and not (
             fsrs.apply_easy_days or auto_reschedule
         ):
@@ -473,11 +471,11 @@ def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
 
             odds_lower = (1 - fsrs.reschedule_threshold) * odds
             dr_lower = odds_lower / (odds_lower + 1)
-            adjusted_ivl_upper = next_interval(s, dr_lower, -decay)
+            adjusted_ivl_upper = fsrs_next_interval(cid, s, dr_lower)
 
             odds_upper = (1 + fsrs.reschedule_threshold) * odds
             dr_upper = odds_upper / (odds_upper + 1)
-            adjusted_ivl_lower = next_interval(s, dr_upper, -decay)
+            adjusted_ivl_lower = fsrs_next_interval(cid, s, dr_upper)
 
             if card.ivl >= adjusted_ivl_lower and card.ivl <= adjusted_ivl_upper:
                 if recompute:
@@ -485,7 +483,7 @@ def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
                 else:
                     return None, False
 
-        new_ivl = fsrs.next_interval(s, -decay)
+        new_ivl = fsrs.next_interval(s)
         due_before = card.odue if card.odid else card.due
         card = update_card_due_ivl(card, new_ivl)
         write_custom_data(card, "v", "reschedule")

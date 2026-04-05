@@ -157,9 +157,10 @@ def flatten_background(did, desired_flatten_limit):
             write_custom_data(card, "v", "flatten")
             flattened_cards.append(card)
             stability = card.memory_state.stability
-            decay = get_decay(card)
-            prev_target_rs.append(power_forgetting_curve(ivl, stability, -decay))
-            new_target_rs.append(power_forgetting_curve(new_ivl, stability, -decay))
+            prev_target_rs.append(fsrs_current_retrievability(card.id, stability, ivl))
+            new_target_rs.append(
+                fsrs_current_retrievability(card.id, stability, new_ivl)
+            )
             cnt += 1
             if cnt % 500 == 0:
                 mw.taskman.run_on_main(

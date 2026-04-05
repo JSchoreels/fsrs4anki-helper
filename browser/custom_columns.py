@@ -67,8 +67,8 @@ class TargetRetrievabilityColumn(CustomColumn):
             return t("not-available")
         if not card.memory_state:
             return t("not-available")
-        retrievability = power_forgetting_curve(
-            card.ivl, card.memory_state.stability, -get_decay(card)
+        retrievability = fsrs_current_retrievability(
+            card.id, card.memory_state.stability, card.ivl
         )
         return f"{retrievability * 100:.2f}%"
 

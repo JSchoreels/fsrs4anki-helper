@@ -177,6 +177,123 @@ def next_interval(s, r, decay=DECAY):
     return max(1, int(round(ivl)))
 
 
+def fsrs_current_retrievability(card_id: int, stability: float, elapsed_days: float) -> float:
+    elapsed_days = max(elapsed_days, 0.0)
+    if hasattr(mw.col, "fsrs_current_retrievability"):
+        return mw.col.fsrs_current_retrievability(
+            card_id=card_id,
+            stability=stability,
+            elapsed_days=elapsed_days,
+        )
+
+    # Fallback for Anki builds that don't expose backend FSRS math APIs.
+    card = mw.col.get_card(card_id)
+    params = fsrs_params_for_card(card)
+    if len(params) >= 35:
+        return fsrs7_forgetting_curve(elapsed_days, stability, params)
+    decay = fsrs_scalar_decay_for_params(params, card)
+    return power_forgetting_curve(elapsed_days, stability, decay)
+
+
+def fsrs_next_interval(card_id: int, stability: float, desired_retention: float) -> int:
+    if hasattr(mw.col, "fsrs_next_interval"):
+        interval = mw.col.fsrs_next_interval(
+            card_id=card_id,
+            stability=stability,
+            desired_retention=desired_retention,
+        )
+        return max(1, int(round(interval)))
+
+    # Fallback for Anki builds that don't expose backend FSRS math APIs.
+    card = mw.col.get_card(card_id)
+    params = fsrs_params_for_card(card)
+    if len(params) >= 35:
+        return fsrs7_next_interval(stability, desired_retention, params)
+    decay = fsrs_scalar_decay_for_params(params, card)
+    return next_interval(stability, desired_retention, decay)
+
+
+def fsrs_params_for_card(card: Card):
+    did = card.odid if card.odid else card.did
+    config = mw.col.decks.config_dict_for_deck_id(did)
+    fsrs_version = config.get("fsrsVersion", 0)
+    if fsrs_version == 1:
+        selected = config.get("fsrsParams6", [])
+    elif fsrs_version == 2:
+        selected = config.get("fsrsParams5", [])
+    elif fsrs_version == 3:
+        selected = config.get("fsrsParams4", [])
+    else:
+        selected = config.get("fsrsParams7", [])
+    if fsrs_params_usable(selected):
+        return selected
+    for key in ("fsrsParams7", "fsrsParams6", "fsrsParams5", "fsrsParams4"):
+        params = config.get(key, [])
+        if fsrs_params_usable(params):
+            return params
+    return []
+
+
+def fsrs_params_usable(params) -> bool:
+    return (
+        isinstance(params, list)
+        and len(params) in (17, 19, 21, 35)
+        and all(isinstance(value, (float, int)) and math.isfinite(value) for value in params)
+    )
+
+
+def fsrs_scalar_decay_for_params(params, card: Card) -> float:
+    if len(params) >= 21:
+        return -max(float(params[20]), 0.001)
+    return -get_decay(card)
+
+
+def fsrs7_forgetting_curve(t: float, s: float, params) -> float:
+    s = max(float(s), 0.001)
+    t_over_s = max(float(t), 0.0) / s
+
+    decay1 = -float(params[27])
+    decay2 = -float(params[28])
+    base1 = float(params[29])
+    base2 = float(params[30])
+
+    factor1 = base1 ** (1.0 / decay1) - 1.0
+    factor2 = base2 ** (1.0 / decay2) - 1.0
+    r1 = (1.0 + factor1 * t_over_s) ** decay1
+    r2 = (1.0 + factor2 * t_over_s) ** decay2
+
+    weight1 = float(params[31]) * (s ** (-float(params[33])))
+    weight2 = float(params[32]) * (s ** float(params[34]))
+
+    return (weight1 * r1 + weight2 * r2) / (weight1 + weight2)
+
+
+def fsrs7_next_interval(stability: float, desired_retention: float, params) -> int:
+    desired_retention = min(max(float(desired_retention), 0.0001), 0.9999)
+    stability = max(float(stability), 0.001)
+    if desired_retention >= 0.9999:
+        return 1
+
+    low = 0.0
+    high = max(stability, 1.0)
+    s_max = 36500.0
+
+    while fsrs7_forgetting_curve(high, stability, params) > desired_retention and high < s_max:
+        high = min(high * 2.0, s_max)
+        if high == s_max:
+            break
+
+    for _ in range(50):
+        mid = (low + high) / 2.0
+        retention = fsrs7_forgetting_curve(mid, stability, params)
+        if retention > desired_retention:
+            low = mid
+        else:
+            high = mid
+
+    return max(1, int(round((low + high) / 2.0)))
+
+
 def write_custom_data(card: Card, key, value):
     if card.custom_data != "":
         custom_data = json.loads(card.custom_data)

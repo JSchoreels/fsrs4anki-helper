@@ -32,12 +32,12 @@ def retention_stability(lim) -> tuple:
     elapse_stability_list = mw.col.db.all(
         f"""
     SELECT 
+        id,
         CASE WHEN odid==0
             THEN {mw.col.sched.today} - (due - ivl)
             ELSE {mw.col.sched.today} - (odue - ivl)
         END
         ,json_extract(data, '$.s')
-        ,COALESCE(json_extract(data, '$.decay'), 0.5)
     FROM cards c1
     WHERE queue != 0 AND queue != -1
     AND data != ''
@@ -45,12 +45,12 @@ def retention_stability(lim) -> tuple:
     """
         + lim
     )
-    # x[0]: elapsed days
-    # x[1]: stability
-    # x[2]: decay
+    # x[0]: card id
+    # x[1]: elapsed days
+    # x[2]: stability
     retention_list = list(
         map(
-            lambda x: power_forgetting_curve(max(x[0], 0), x[1], -x[2]),
+            lambda x: fsrs_current_retrievability(x[0], x[2], x[1]),
             elapse_stability_list,
         )
     )

@@ -53,8 +53,7 @@ def advance(did):
             THEN {mw.col.sched.today} - (due - ivl)
             ELSE {mw.col.sched.today} - (odue - ivl)
             END,
-            json_extract(data, '$.dr'),
-            COALESCE(json_extract(data, '$.decay'), 0.5)
+            json_extract(data, '$.dr')
         FROM cards
         WHERE data != '' 
         AND json_extract(data, '$.s') IS NOT NULL
@@ -69,24 +68,22 @@ def advance(did):
     # x[3]: stability
     # x[4]: elapsed days
     # x[5]: desired retention
-    # x[6]: decay
-    # x[7]: current retention
+    # x[6]: target interval
     cards = map(
         lambda x: (
             x
             + [
-                power_forgetting_curve(max(x[4], 0), x[3], -x[6]),
+                fsrs_next_interval(x[0], x[3], x[5]),
             ]
         ),
         cards,
     )
 
-    # sort by (1 - elapsed_day / scheduled_day)
-    # = 1-ln(current retention)/ln(requested retention), -stability (ascending)
+    # sort by (1 - elapsed_day / scheduled_day), -stability (ascending)
     cards = sorted(
         cards,
         key=lambda x: (
-            1 - (x[7] ** (-1 / x[6]) - 1) / (x[5] ** (-1 / x[6]) - 1),
+            1 - max(x[4], 0) / max(x[6], 1),
             -x[3],
         ),
     )
@@ -94,7 +91,7 @@ def advance(did):
         list(
             filter(
                 lambda x: (
-                    1 - (x[7] ** (-1 / x[6]) - 1) / (x[5] ** (-1 / x[6]) - 1) < 0.13
+                    1 - max(x[4], 0) / max(x[6], 1) < 0.13
                 ),
                 cards,
             )
@@ -117,7 +114,7 @@ def advance(did):
     advanced_cards = []
     start_time = time.time()
     undo_entry = mw.col.add_custom_undo_entry(t("advance"))
-    for cid, did, ivl, stability, _, _, decay, _ in cards:
+    for cid, did, ivl, stability, _, _, _ in cards:
         if cnt >= desired_advance_cnt:
             break
 
@@ -127,8 +124,8 @@ def advance(did):
         card = update_card_due_ivl(card, new_ivl)
         write_custom_data(card, "v", "advance")
         advanced_cards.append(card)
-        prev_target_rs.append(power_forgetting_curve(ivl, stability, -decay))
-        new_target_rs.append(power_forgetting_curve(new_ivl, stability, -decay))
+        prev_target_rs.append(fsrs_current_retrievability(cid, stability, ivl))
+        new_target_rs.append(fsrs_current_retrievability(cid, stability, new_ivl))
         cnt += 1
 
     mw.col.update_cards(advanced_cards)

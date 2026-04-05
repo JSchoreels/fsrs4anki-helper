@@ -3,8 +3,7 @@ from anki.template import TemplateRenderContext, TemplateRenderOutput
 
 from .configuration import Config
 from .utils import (
-    get_decay,
-    power_forgetting_curve,
+    fsrs_current_retrievability,
     get_last_review_date_and_interval,
     mw,
 )
@@ -66,7 +65,7 @@ def calc_r(ctx: TemplateRenderContext) -> str:
     stability = card.memory_state.stability
     last_review, _ = get_last_review_date_and_interval(card)
     elapsed_days = mw.col.sched.today - last_review
-    retrievability = power_forgetting_curve(elapsed_days, stability, -get_decay(card))
+    retrievability = fsrs_current_retrievability(card.id, stability, elapsed_days)
     return t("x-%", count=f"{(retrievability * 100):.1f}")
 
 

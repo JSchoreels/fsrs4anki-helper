@@ -19,9 +19,8 @@ from aqt.utils import tooltip
 
 from ..i18n import t
 from ..utils import (
-    get_decay,
+    fsrs_current_retrievability,
     get_last_review_date_and_interval,
-    power_forgetting_curve,
     update_card_due_ivl,
     write_custom_data,
 )
@@ -50,11 +49,12 @@ def _append_log_entry(log_path: Optional[Path], break_card: BreakCard, new_due: 
 
     original_interval = break_card.original_interval
     new_interval = max(1, new_due - break_card.last_review)
-    decay = -get_decay(break_card.card)
-    retention_original = power_forgetting_curve(
-        original_interval, break_card.stability, decay
+    retention_original = fsrs_current_retrievability(
+        break_card.card.id, break_card.stability, original_interval
     )
-    retention_new = power_forgetting_curve(new_interval, break_card.stability, decay)
+    retention_new = fsrs_current_retrievability(
+        break_card.card.id, break_card.stability, new_interval
+    )
 
     header = (
         "card_id,stability,last_review,original_due,new_due,"
