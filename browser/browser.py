@@ -10,6 +10,7 @@ from .custom_columns import (
     CustomColumn,
     TargetRetrievabilityColumn,
 )
+from .sort_order import target_retrievability_order
 from ..utils import *
 
 browser: Optional[Browser] = None
@@ -75,6 +76,13 @@ def _on_browser_will_search_handle_custom_column_ordering(ctx: SearchContext):
         (c for c in custom_columns if c.builtin_column.key == ctx.order.key), None
     )
     if custom_column is None:
+        return
+
+    if isinstance(custom_column, TargetRetrievabilityColumn):
+        ctx.order = target_retrievability_order(
+            ctx.browser.table._model.columns,
+            custom_column.order_by_str(),
+        )
         return
 
     ctx.order = custom_column.order_by_str()

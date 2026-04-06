@@ -152,9 +152,9 @@ def disperse(siblings):
     }
     latest_review = max(last_review.values())
     due_ranges[-1] = (latest_review, latest_review)
-    min_gap, best_due_dates = maximize_siblings_due_gap(due_ranges)
+    _, best_due_dates = maximize_siblings_due_gap(due_ranges)
     best_due_dates.pop(-1)
-    return best_due_dates, due_ranges, min_gap
+    return best_due_dates
 
 
 def disperse_siblings(
@@ -206,7 +206,7 @@ def disperse_siblings_background(
     dispersed_cards = []
     undo_entry = mw.col.add_custom_undo_entry(t("disperse-siblings"))
     for nid, siblings in nid_siblings.items():
-        best_due_dates, _, _ = disperse(siblings)
+        best_due_dates = disperse(siblings)
         for cid, due in best_due_dates.items():
             card = mw.col.get_card(cid)
             last_review, _ = get_last_review_date_and_interval(card)
@@ -251,10 +251,9 @@ def disperse_siblings_when_review(reviewer, card: Card, ease):
 
     messages = []
 
-    card_cnt = 0
     dispersed_cards = []
     last_undo_step = mw.col.undo_status().last_step
-    best_due_dates, due_ranges, min_gap = disperse(siblings)
+    best_due_dates = disperse(siblings)
 
     for cid, due in best_due_dates.items():
         card = mw.col.get_card(cid)
@@ -263,7 +262,6 @@ def disperse_siblings_when_review(reviewer, card: Card, ease):
         card = update_card_due_ivl(card, due - last_review)
         write_custom_data(card, "v", "disperse")
         dispersed_cards.append(card)
-        card_cnt += 1
         message = t(
             "disperse-card-message",
             card_id=card.id,
@@ -276,20 +274,7 @@ def disperse_siblings_when_review(reviewer, card: Card, ease):
     mw.col.merge_undo_entries(last_undo_step)
 
     if config.debug_notify:
-        text = ""
-        if min_gap == 0:
-            for cid, due_range in due_ranges.items():
-                text += (
-                    t(
-                        "disperse-card-range",
-                        card_id=cid,
-                        start_due=due_to_date_str(due_range[0]),
-                        end_due=due_to_date_str(due_range[1]),
-                    )
-                    + "<br/>"
-                )
-            text = t("disperse-too-close") + "<br/>" + text
-        tooltip(text + "<br/>".join(messages))
+        tooltip("<br/>".join(messages))
 
 
 # Modifying the algorithm to accept a dictionary as input and return a dictionary as output

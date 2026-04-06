@@ -15,6 +15,19 @@ from anki.stats import (
 from aqt import mw
 from datetime import date, datetime, timedelta
 
+try:
+    from . import fsrs_math
+except ImportError:
+    import importlib.util
+    from pathlib import Path
+
+    fsrs_math_path = Path(__file__).with_name("fsrs_math.py")
+    spec = importlib.util.spec_from_file_location("fsrs_math", fsrs_math_path)
+    if spec is None or spec.loader is None:
+        raise
+    fsrs_math = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fsrs_math)
+
 
 def RepresentsInt(s):
     try:
@@ -163,18 +176,15 @@ def sched_current_date() -> date:
     return (now - timedelta(hours=next_day_start_at)).date()
 
 
-DECAY = -0.2
+DECAY = fsrs_math.DEFAULT_DECAY
 
 
 def power_forgetting_curve(t, s, decay=DECAY):
-    factor = 0.9 ** (1 / decay) - 1
-    return (1 + factor * t / s) ** decay
+    return fsrs_math.power_forgetting_curve(t, s, decay)
 
 
 def next_interval(s, r, decay=DECAY):
-    factor = 0.9 ** (1 / decay) - 1
-    ivl = s / factor * (r ** (1 / decay) - 1)
-    return max(1, int(round(ivl)))
+    return fsrs_math.next_interval(s, r, decay)
 
 
 def fsrs_current_retrievability(card_id: int, stability: float, elapsed_days: float) -> float:
@@ -190,9 +200,9 @@ def fsrs_current_retrievability(card_id: int, stability: float, elapsed_days: fl
     card = mw.col.get_card(card_id)
     params = fsrs_params_for_card(card)
     if len(params) >= 35:
-        return fsrs7_forgetting_curve(elapsed_days, stability, params)
+        return fsrs_math.fsrs7_forgetting_curve(elapsed_days, stability, params)
     decay = fsrs_scalar_decay_for_params(params, card)
-    return power_forgetting_curve(elapsed_days, stability, decay)
+    return fsrs_math.power_forgetting_curve(elapsed_days, stability, decay)
 
 
 def fsrs_next_interval(card_id: int, stability: float, desired_retention: float) -> int:
@@ -207,10 +217,17 @@ def fsrs_next_interval(card_id: int, stability: float, desired_retention: float)
     # Fallback for Anki builds that don't expose backend FSRS math APIs.
     card = mw.col.get_card(card_id)
     params = fsrs_params_for_card(card)
-    if len(params) >= 35:
-        return fsrs7_next_interval(stability, desired_retention, params)
     decay = fsrs_scalar_decay_for_params(params, card)
-    return next_interval(stability, desired_retention, decay)
+    return fsrs_math.interval_for_target_retrievability(
+        stability=stability,
+        desired_retention=desired_retention,
+        params=params,
+        decay=decay,
+    )
+
+
+def fsrs_s90(card_id: int, stability: float) -> int:
+    return fsrs_next_interval(card_id, stability, 0.9)
 
 
 def fsrs_params_for_card(card: Card):
@@ -249,49 +266,11 @@ def fsrs_scalar_decay_for_params(params, card: Card) -> float:
 
 
 def fsrs7_forgetting_curve(t: float, s: float, params) -> float:
-    s = max(float(s), 0.001)
-    t_over_s = max(float(t), 0.0) / s
-
-    decay1 = -float(params[27])
-    decay2 = -float(params[28])
-    base1 = float(params[29])
-    base2 = float(params[30])
-
-    factor1 = base1 ** (1.0 / decay1) - 1.0
-    factor2 = base2 ** (1.0 / decay2) - 1.0
-    r1 = (1.0 + factor1 * t_over_s) ** decay1
-    r2 = (1.0 + factor2 * t_over_s) ** decay2
-
-    weight1 = float(params[31]) * (s ** (-float(params[33])))
-    weight2 = float(params[32]) * (s ** float(params[34]))
-
-    return (weight1 * r1 + weight2 * r2) / (weight1 + weight2)
+    return fsrs_math.fsrs7_forgetting_curve(t, s, params)
 
 
 def fsrs7_next_interval(stability: float, desired_retention: float, params) -> int:
-    desired_retention = min(max(float(desired_retention), 0.0001), 0.9999)
-    stability = max(float(stability), 0.001)
-    if desired_retention >= 0.9999:
-        return 1
-
-    low = 0.0
-    high = max(stability, 1.0)
-    s_max = 36500.0
-
-    while fsrs7_forgetting_curve(high, stability, params) > desired_retention and high < s_max:
-        high = min(high * 2.0, s_max)
-        if high == s_max:
-            break
-
-    for _ in range(50):
-        mid = (low + high) / 2.0
-        retention = fsrs7_forgetting_curve(mid, stability, params)
-        if retention > desired_retention:
-            low = mid
-        else:
-            high = mid
-
-    return max(1, int(round((low + high) / 2.0)))
+    return fsrs_math.fsrs7_next_interval(stability, desired_retention, params)
 
 
 def write_custom_data(card: Card, key, value):

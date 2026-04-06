@@ -73,4 +73,5 @@ class TargetRetrievabilityColumn(CustomColumn):
         return f"{retrievability * 100:.2f}%"
 
     def order_by_str(self) -> str:
-        return """ivl / json_extract(CASE WHEN c.data != "" THEN c.data ELSE "{}" END, '$.s') ASC"""
+        # Avoid sorting by ivl/stability approximation; stability is not S90 on FSRS-7.
+        return "c.id"

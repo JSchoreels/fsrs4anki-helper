@@ -4,6 +4,7 @@ from anki.template import TemplateRenderContext, TemplateRenderOutput
 from .configuration import Config
 from .utils import (
     fsrs_current_retrievability,
+    fsrs_s90,
     get_last_review_date_and_interval,
     mw,
 )
@@ -47,7 +48,7 @@ def calc_s(ctx: TemplateRenderContext) -> str:
     if card.memory_state is None:
         return ""
     stability = card.memory_state.stability
-    return t("x-days", count=round(stability, 2))
+    return t("x-days", count=fsrs_s90(card.id, stability))
 
 
 def calc_d(ctx: TemplateRenderContext) -> str:
