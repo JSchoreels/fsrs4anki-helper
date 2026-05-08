@@ -1,0 +1,66 @@
+name: Package Anki Add-on
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*.*.*"
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build .ankiaddon
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python sources
+        run: >
+          python -m compileall -q
+          __init__.py utils.py dsr_state.py sync_hook.py stats.py
+          configuration.py i18n.py steps.py browser schedule
+          python_i18n/i18n scripts
+
+      - name: Package add-on
+        run: ./package.sh . dist
+
+      - name: Validate add-on archive
+        run: python scripts/validate_anki_addon.py
+
+      - name: Upload add-on artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsrs4anki-helper-ankiaddon
+          path: dist/fsrs4anki-helper.ankiaddon
+          if-no-files-found: error
+
+      - name: Upload direct add-on asset to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/fsrs4anki-helper.ankiaddon --clobber
+          else
+            gh release create "$TAG_NAME" dist/fsrs4anki-helper.ankiaddon \
+              --title "$TAG_NAME" \
+              --notes "Automated FSRS Helper add-on build."
+          fi
