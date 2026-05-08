@@ -33,7 +33,9 @@ FORBIDDEN_SUFFIXES = {".pyc", ".pyo", ".DS_Store"}
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate the packaged FSRS Helper add-on.")
+    parser = argparse.ArgumentParser(
+        description="Validate the packaged FSRS Helper add-on."
+    )
     parser.add_argument(
         "archive",
         nargs="?",
