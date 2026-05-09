@@ -1,24 +1,26 @@
 import random
 import time
-from aqt import QAction, browser
-from .disperse_siblings import disperse_siblings
-from anki.cards import Card, FSRSMemoryState
-from anki.decks import DeckManager
-from anki.utils import ids2str, point_version
-from anki.stats import (
-    CARD_TYPE_REV,
-    QUEUE_TYPE_SUSPENDED,
-    QUEUE_TYPE_NEW,
-    QUEUE_TYPE_PREVIEW,
-)
-from aqt.gui_hooks import browser_menus_did_init
-from aqt.utils import tooltip
-from typing import List, Dict
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from ..i18n import t
+from typing import Dict, List
+
+from anki.cards import Card, FSRSMemoryState
+from anki.decks import DeckManager
+from anki.stats import (
+    CARD_TYPE_REV,
+    QUEUE_TYPE_NEW,
+    QUEUE_TYPE_PREVIEW,
+    QUEUE_TYPE_SUSPENDED,
+)
+from anki.utils import ids2str, point_version
+from aqt import QAction, browser
+from aqt.gui_hooks import browser_menus_did_init
+from aqt.utils import tooltip
+
 from ..configuration import Config
+from ..i18n import t
 from ..utils import *
+from .disperse_siblings import disperse_siblings
 
 
 def check_review_distribution(actual_reviews: List[int], percentages: List[float]):
@@ -84,9 +86,9 @@ class FSRS:
         true_due = "CASE WHEN odid==0 THEN due ELSE odue END"
         original_did = "CASE WHEN odid==0 THEN did ELSE odid END"
 
-        deck_stats = mw.col.db.all(f"""SELECT {original_did}, {true_due}, count() 
-                FROM cards 
-                WHERE type = 2  
+        deck_stats = mw.col.db.all(f"""SELECT {original_did}, {true_due}, count()
+                FROM cards
+                WHERE type = 2
                 AND queue != -1
                 GROUP BY {original_did}, {true_due}""")
 
@@ -266,12 +268,12 @@ def reschedule(
         config = Config()
         config.load()
         if config.auto_disperse_after_reschedule:
-            finish_text, filtered_nid_string = future.result()
+            _, finish_text, filtered_nid_string = future.result()
             mw.progress.finish()
             mw.reset()
             disperse_siblings(did, True, filtered_nid_string, finish_text)
         else:
-            finish_text = future.result()
+            _, finish_text = future.result()
             mw.progress.finish()
             tooltip(
                 t(
@@ -331,10 +333,10 @@ def reschedule_background(
     if recent:
         today_cutoff = mw.col.sched.day_cutoff
         day_before_cutoff = today_cutoff - (config.days_to_reschedule + 1) * 86400
-        recent_query = f"""AND id IN 
+        recent_query = f"""AND id IN
             (
-                SELECT cid 
-                FROM revlog 
+                SELECT cid
+                FROM revlog
                 WHERE id >= {day_before_cutoff * 1000}
                 AND ease > 0
                 AND (type < 3 OR factor != 0)
@@ -358,7 +360,7 @@ def reschedule_background(
     )
 
     cid_did_nid = mw.col.db.all(f"""
-        SELECT 
+        SELECT
             id,
             CASE WHEN odid==0
             THEN did
@@ -437,9 +439,9 @@ def reschedule_background(
 
     if config.auto_disperse_after_reschedule:
         filtered_nid_string = ids2str(filtered_nids)
-        return (finish_text, filtered_nid_string)
+        return (cnt, finish_text, filtered_nid_string)
 
-    return finish_text
+    return (cnt, finish_text)
 
 
 def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
@@ -463,6 +465,8 @@ def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
     if card.type == CARD_TYPE_REV:
         fsrs.set_card(card)
         fsrs.set_fuzz_factor(cid, card.reps)
+        card.desired_retention = fsrs.desired_retention
+
         if fsrs.reschedule_threshold > 0 and not (
             fsrs.apply_easy_days or auto_reschedule
         ):
