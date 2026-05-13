@@ -40,6 +40,7 @@ rm -f "$OUT_FILE"
         browser/sort_order.py \
         schedule/ \
         locale/ \
+        docs/ \
         python_i18n/i18n/ \
         manifest.json \
         README.md \
@@ -54,5 +55,7 @@ rm -f "$OUT_FILE"
         -x "*.pyo" \
         -x "*.DS_Store"
 )
+
+python3 "$ADDON_DIR/scripts/validate_anki_addon.py" "$OUT_FILE"
 
 echo "Wrote $OUT_FILE"
