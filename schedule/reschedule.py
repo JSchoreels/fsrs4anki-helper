@@ -446,6 +446,7 @@ def reschedule_background(
 
 def reschedule_card(cid, fsrs: FSRS, recompute=False, auto_reschedule=False):
     card = mw.col.get_card(cid)
+    fsrs.desired_retention = get_effective_dr(card, fsrs.desired_retention)
     if recompute:
         memory_state = mw.col.compute_memory_state(cid)
         s = memory_state.stability

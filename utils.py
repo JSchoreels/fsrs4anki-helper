@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import time
 from anki.decks import DeckManager
@@ -27,6 +28,9 @@ except ImportError:
         raise
     fsrs_math = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fsrs_math)
+
+logger = logging.getLogger(__name__)
+_dynamic_dr_warning_logged = False
 
 
 def RepresentsInt(s):
@@ -358,4 +362,53 @@ def get_dr(deck_manager: DeckManager, did: int):
         deck_manager.get(did).get("desiredRetention") / 100
         if deck_manager.get(did).get("desiredRetention") is not None
         else deck_manager.config_dict_for_deck_id(did)["desiredRetention"]
+    )
+
+
+def _log_dynamic_dr_warning_once(message: str, *args, **kwargs) -> None:
+    global _dynamic_dr_warning_logged
+    if _dynamic_dr_warning_logged:
+        return
+    _dynamic_dr_warning_logged = True
+    logger.warning(message, *args, **kwargs)
+
+
+def get_effective_dr(card: Card, base_desired_retention: float) -> float:
+    try:
+        from dynamic_desired_retention import effective_desired_retention
+    except ModuleNotFoundError as exc:
+        if exc.name == "dynamic_desired_retention":
+            logger.debug("dynamic desired retention resolver is not installed")
+        else:
+            _log_dynamic_dr_warning_once(
+                "dynamic desired retention resolver import failed: %s", exc
+            )
+        return base_desired_retention
+    except ImportError as exc:
+        _log_dynamic_dr_warning_once(
+            "dynamic desired retention resolver is unavailable: %s", exc
+        )
+        return base_desired_retention
+    except Exception:
+        _log_dynamic_dr_warning_once(
+            "dynamic desired retention resolver import failed", exc_info=True
+        )
+        return base_desired_retention
+
+    try:
+        desired_retention = effective_desired_retention(
+            collection=mw.col,
+            card=card,
+            current_desired_retention=base_desired_retention,
+        )
+    except Exception:
+        _log_dynamic_dr_warning_once(
+            "dynamic desired retention resolver failed", exc_info=True
+        )
+        return base_desired_retention
+
+    return (
+        base_desired_retention
+        if desired_retention is None
+        else float(desired_retention)
     )
